@@ -7,6 +7,7 @@ import { useAssistant } from '../../providers/AssistantProvider';
 import { colors, styles as s } from '../../theme/styles';
 import { readLatestDriveBackup } from '../../services/driveBackup';
 import { NotificationControls } from '../../components/NotificationControls';
+import { BackendSetup } from '../../components/BackendSetup';
 
 const connections: { name: string; description: string; icon: IconName; available?: boolean }[] = [
   { name: 'Calendar', description: 'Review and save events on your phone', icon: 'calendar', available: true },
@@ -37,6 +38,7 @@ export default function SettingsScreen() {
     <Section title="Your notification assistant" />
     <NotificationControls />
     <Section title="Keep your data safe" />
+    <BackendSetup />
     <Card>
       <View style={s.row}><View style={[s.inline, s.flexible]}><View style={s.iconBox}><Icon name="shield" /></View><View style={s.flexible}><Text style={s.cardTitle}>Phone internal storage</Text><Text style={s.small}>Automatically saved on this device</Text></View></View><Badge label="Local" /></View>
       <Text style={s.note}>Messages, call alerts, preferences and drafts stay in private internal app storage. No SD card access or app server is needed. Google Drive keeps an optional daily backup; local saving works offline.</Text>

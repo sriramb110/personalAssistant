@@ -24,7 +24,8 @@
     },
     "plugins": [
       "expo-router",
-      "expo-background-task"
+      "expo-background-task",
+      "expo-secure-store"
     ],
     "scheme": "anbu"
   }
