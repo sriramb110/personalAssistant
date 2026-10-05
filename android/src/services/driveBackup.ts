@@ -1,22 +1,24 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import { defaultDriveSettings, STORAGE_KEYS } from '../config/defaults';
 import { parseBackup, readBackup } from './storage';
 
-const SETTINGS_KEY = 'anbu.drive.v1';
-const UPLOADED_DATA_KEY = 'anbu.drive.uploaded-data.v1';
 const SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
 export type DriveSettings = { enabled: boolean; email: string; lastBackup: string; lastError: string; webClientId: string };
-const defaults: DriveSettings = { enabled: false, email: '', lastBackup: '', lastError: '', webClientId: '' };
 let configuredClientId = '';
 let activeBackup: Promise<void> | null = null;
 
 export async function getDriveSettings(): Promise<DriveSettings> {
-  const raw = await AsyncStorage.getItem(SETTINGS_KEY);
-  return { ...defaults, webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '', ...(raw ? JSON.parse(raw) : {}) };
+  const raw = await AsyncStorage.getItem(STORAGE_KEYS.driveSettings);
+  return {
+    ...defaultDriveSettings,
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '',
+    ...(raw ? JSON.parse(raw) : {}),
+  };
 }
 
 async function updateSettings(patch: Partial<DriveSettings>) {
-  await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...await getDriveSettings(), ...patch }));
+  await AsyncStorage.setItem(STORAGE_KEYS.driveSettings, JSON.stringify({ ...await getDriveSettings(), ...patch }));
 }
 
 export async function saveDriveClientId(value: string) {
@@ -27,7 +29,7 @@ export async function saveDriveClientId(value: string) {
   if ((await getDriveSettings()).enabled) throw new Error('Disconnect Google Drive before changing the client ID.');
   if (activeBackup) await activeBackup.catch(() => {});
   await updateSettings({ webClientId, email: '', lastBackup: '', lastError: '' });
-  await AsyncStorage.setItem(UPLOADED_DATA_KEY, '');
+  await AsyncStorage.setItem(STORAGE_KEYS.uploadedData, '');
   configuredClientId = '';
 }
 
@@ -80,7 +82,7 @@ export async function connectDrive(clientId?: string) {
   // Confirm access is available before enabling automatic uploads.
   await GoogleSignin.getTokens();
   await updateSettings({ enabled: true, email: response.data.user.email, lastBackup: '', lastError: '' });
-  await AsyncStorage.setItem(UPLOADED_DATA_KEY, '');
+  await AsyncStorage.setItem(STORAGE_KEYS.uploadedData, '');
   return true;
 }
 
@@ -91,7 +93,7 @@ export async function disconnectDrive() {
   const { GoogleSignin } = await google();
   await GoogleSignin.signOut();
   await updateSettings({ enabled: false, email: '', lastBackup: '', lastError: '' });
-  await AsyncStorage.setItem(UPLOADED_DATA_KEY, '');
+  await AsyncStorage.setItem(STORAGE_KEYS.uploadedData, '');
 }
 
 export function localDay(date = new Date()): string {
@@ -107,7 +109,7 @@ export async function runDailyBackup(force = false): Promise<void> {
       const raw = await readBackup();
       const data = JSON.stringify(parseBackup(raw).data);
       const alreadyBackedUpToday = settings.lastBackup && localDay(new Date(settings.lastBackup)) === localDay();
-      if (!force && alreadyBackedUpToday && await AsyncStorage.getItem(UPLOADED_DATA_KEY) === data) return;
+      if (!force && alreadyBackedUpToday && await AsyncStorage.getItem(STORAGE_KEYS.uploadedData) === data) return;
       const name = `anbu-${localDay()}.json`;
       const query = new URLSearchParams({ spaces: 'appDataFolder', q: `name = '${name}' and trashed = false`, fields: 'files(id)' });
       const list = await (await driveRequest(`https://www.googleapis.com/drive/v3/files?${query}`)).json();
@@ -120,7 +122,7 @@ export async function runDailyBackup(force = false): Promise<void> {
         const body = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${raw}\r\n--${boundary}--`;
         await driveRequest('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', { method: 'POST', headers: { 'Content-Type': `multipart/related; boundary=${boundary}` }, body });
       }
-      await AsyncStorage.setItem(UPLOADED_DATA_KEY, data);
+      await AsyncStorage.setItem(STORAGE_KEYS.uploadedData, data);
       await updateSettings({ lastBackup: new Date().toISOString(), lastError: '' });
     } catch (error) {
       await updateSettings({ lastError: error instanceof Error ? error.message : 'Backup failed. Will retry later.' });

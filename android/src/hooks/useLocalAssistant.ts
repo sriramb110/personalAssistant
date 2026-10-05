@@ -9,36 +9,45 @@ export function useLocalAssistant() {
   const latest = useRef(defaultData);
   const [ready, setReady] = useState(false);
   const [error, setError] = useState('');
+
+  const updateSnapshot = useCallback((next: AssistantData) => {
+    latest.current = next;
+    setData(next);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     loadData().then(saved => {
-      if (!cancelled) { latest.current = saved; setData(saved); setReady(true); }
+      if (!cancelled) {
+        updateSnapshot(saved);
+        setReady(true);
+      }
     }).catch(() => {
       if (!cancelled) setError('Could not read local data. Restart the app to retry. Saved data has not been overwritten.');
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [updateSnapshot]);
+
   useEffect(() => {
-    if (ready) saveData(data).catch(() => setError('Could not save local data. Please check device storage.'));
+    if (!ready) return;
+    saveData(data).catch(() => setError('Could not save local data. Please check device storage.'));
   }, [data, ready]);
+
   function set<K extends keyof AssistantData>(key: K, value: AssistantData[K]) {
     const next = { ...latest.current, [key]: value };
-    latest.current = next;
-    setData(next);
+    updateSnapshot(next);
   }
+
   async function restoreData(saved: AssistantData) {
     await saveData(saved);
-    latest.current = saved;
-    setData(saved);
+    updateSnapshot(saved);
   }
+
   const importMessages = useCallback(async (messages: Message[]) => {
     const next = { ...latest.current, messages: mergeNotificationMessages(latest.current.messages, messages) };
     await saveData(next);
-    // Preserve edits made while the durable write was in progress.
-    const current = { ...latest.current, messages: mergeNotificationMessages(latest.current.messages, messages) };
-    latest.current = current;
-    setData(current);
-    await saveData(current);
-  }, []);
+    updateSnapshot(next);
+  }, [updateSnapshot]);
+
   return { data, ready, error, setError, set, restoreData, importMessages };
 }
