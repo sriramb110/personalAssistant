@@ -46,7 +46,9 @@ export function useLocalAssistant() {
   const importMessages = useCallback(async (messages: Message[]) => {
     const next = { ...latest.current, messages: mergeNotificationMessages(latest.current.messages, messages) };
     await saveData(next);
-    updateSnapshot(next);
+    const current = { ...latest.current, messages: mergeNotificationMessages(latest.current.messages, messages) };
+    updateSnapshot(current);
+    await saveData(current);
   }, [updateSnapshot]);
 
   return { data, ready, error, setError, set, restoreData, importMessages };

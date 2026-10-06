@@ -12,7 +12,7 @@ import { BackendSetup } from '../../components/BackendSetup';
 const connections: { name: string; description: string; icon: IconName; available?: boolean }[] = [
   { name: 'Calendar', description: 'Review and save events on your phone', icon: 'calendar', available: true },
   { name: 'SMS replies', description: 'Review messages in your SMS app', icon: 'message', available: true },
-  { name: 'Email inbox', description: 'Account connection is not set up', icon: 'mail' },
+  { name: 'Gmail and Drive', description: 'Connect your account from the Google tab', icon: 'mail', available: true },
 ];
 export default function SettingsScreen() {
   const { name, setName, custom, setCustom, tamil, drive, restoreData } = useAssistant();

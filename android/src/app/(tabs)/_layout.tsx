@@ -6,7 +6,7 @@ import { colors } from '../../theme/styles';
 
 const screens: { name: string; title: string; icon: IconName }[] = [
   { name: 'index', title: 'Today', icon: 'home' }, { name: 'inbox', title: 'Inbox', icon: 'inbox' },
-  { name: 'calls', title: 'Calls', icon: 'phone' }, { name: 'settings', title: 'Settings', icon: 'settings' },
+  { name: 'calls', title: 'Calls', icon: 'phone' }, { name: 'google', title: 'Google', icon: 'mail' }, { name: 'settings', title: 'Settings', icon: 'settings' },
 ];
 export default function TabLayout() {
   const insets = useSafeAreaInsets();

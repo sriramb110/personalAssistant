@@ -4,3 +4,6 @@ __pycache__/
 .env
 backend/.env
 backend/.venv/
+.vscode
+.tools/
+backend/.runtime/

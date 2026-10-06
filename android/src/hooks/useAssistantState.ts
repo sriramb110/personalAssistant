@@ -20,7 +20,7 @@ export function useAssistantState() {
     catch (error) { setError(error instanceof Error ? error.message : 'Could not open SMS composer.'); }
   }
   return {
-    ...data, ready, error, setError, restoreData, importMessages, reply, speak, calendar, sms,
+    ...data, snapshot: data, ready, error, setError, restoreData, importMessages, reply, speak, calendar, sms,
     setName: (value: string) => set('name', value),
     setTamil: (value: boolean) => set('tamil', value),
     setBusy: (value: boolean) => set('busy', value),

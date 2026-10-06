@@ -34,7 +34,7 @@ Open a compatible native Android development build, or run `npm.cmd start -- --g
 
 ## Implemented
 
-- Four screens: daily brief, inbox, calls and settings.
+- Five screens: daily brief, inbox, calls, Google and settings.
 - Device Tamil / English text-to-speech and important-message readout.
 - Sample inbox and manually pasted messages with keyword-based priority and manual overrides.
 - Calendar event editor (review and save in the system calendar).
@@ -94,12 +94,26 @@ Android links the Google Sign-In native library automatically. No Firebase proje
 
 References: [Google app-data storage](https://developers.google.com/workspace/drive/api/guides/appdata), [Google Sign-In Expo setup](https://react-native-google-signin.github.io/docs/setting-up/expo), [Expo background tasks](https://docs.expo.dev/versions/v57.0.0/sdk/background-task/).
 
+## Backend connection
+
+Settings includes authenticated HTTPS backend connection, local-to-server snapshot upload, confirmed restore, and optional automatic foreground sync. The approved temporary default URL is `https://curve-ultra-produced-civilization.trycloudflare.com`. Copy the backend key from local `backend/.env`; the phone stores it in SecureStore. Do not add the backend key to public Expo environment variables. Backend requests send only the local snapshot, excluding Google IDs and OAuth tokens. After the temporary tunnel changes, disconnect and enter the new URL. See `../backend/README.md` for running and HTTPS setup. All local data remains available offline. Google workspace requests go directly to Google rather than through the backend.
+
+## Gmail and Drive files
+
+The Google tab adds device-side Gmail inbox reading, reviewed email sending, and plain text note creation/reading in My Drive. Set the Web client ID in Settings, enable **Gmail API** and **Google Drive API** in the same Google Cloud project, then select **Connect Gmail and Drive** and approve the additional scopes. The native Google SDK manages account sessions and tokens. Existing consent can be reused; first-time account selection and consent cannot be bypassed.
+
+Scopes are `gmail.readonly`, `gmail.send` and `drive.file`, in addition to the private backup's `drive.appdata`. Drive file access is limited to files created or opened through Anbu, not every file in the account. The current interface creates new `.txt` notes and displays up to 100 accessible files. Gmail displays the latest 20 inbox messages, preferring plain text and otherwise showing the snippet; attachments and full HTML rendering are not implemented. Read requests do not mark mail read. Sending shows the recipient, subject and body for confirmation. UTF-8 Tamil/English content is encoded as MIME/base64url.
+
+Email content stays in screen memory until you choose **Save to local inbox**; saved emails join local storage and connected daily Drive backups. Google requests do not go through the Python backend. No email is sent automatically on sign-in. Google permission revocation or an API error must be resolved by reconnecting/configuring your project. Public Gmail access can require Google's sensitive/restricted OAuth scope verification. The native account flow still requires physical-phone testing with your OAuth project.
+
+References: [Gmail scopes](https://developers.google.com/workspace/gmail/api/auth/scopes), [Sending email](https://developers.google.com/workspace/gmail/api/guides/sending), [Drive file scopes](https://developers.google.com/workspace/drive/api/guides/api-specific-auth).
+
 ## Remaining integrations
 
 1. **Calls:** This frontend-only app does not answer calls, record callers or generate transcripts. Ordinary Android apps do not have unrestricted access to cellular call audio. Device speech previews and SMS composition are available.
 2. **WhatsApp:** Notification text capture is implemented with user-authorized Android notification access. Full chat history and sending WhatsApp messages are not implemented.
 3. **SMS:** Default SMS app notification capture and the system composer are implemented. Reading the SMS database or sending messages automatically is not implemented.
-4. **Email:** Account authorization and a device-side provider API integration are not yet implemented. Never put provider secrets in this mobile app.
+4. **Email:** Gmail read/send and incremental account authorization are implemented in the Google tab. Other email providers, attachments and mailbox editing are not implemented. Never put provider secrets in this mobile app.
 5. **Calendar updates:** The current app opens the system event editor. Reading upcoming events requires calendar permission and a separate sync implementation.
 6. **Silent / DND:** Implement an Android native module with notification policy access and current Android behavior. The busy switch currently stores a preference only; it does not change device mode or trigger messages.
 7. **Summaries:** Current priority matching and readout run locally. No cloud AI or summary backend is used.

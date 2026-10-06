@@ -4,7 +4,8 @@ import { defaultDriveSettings, STORAGE_KEYS } from '../config/defaults';
 import { parseBackup, readBackup } from './storage';
 
 const SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
-export type DriveSettings = { enabled: boolean; email: string; lastBackup: string; lastError: string; webClientId: string };
+export type DriveSettings = { enabled: boolean; email: string; lastBackup: string; lastError: string; webClientId: string; workspaceEnabled?: boolean };
+export const WORKSPACE_SCOPES = ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.send', 'https://www.googleapis.com/auth/drive.file'];
 let configuredClientId = '';
 let activeBackup: Promise<void> | null = null;
 
@@ -28,7 +29,7 @@ export async function saveDriveClientId(value: string) {
   }
   if ((await getDriveSettings()).enabled) throw new Error('Disconnect Google Drive before changing the client ID.');
   if (activeBackup) await activeBackup.catch(() => {});
-  await updateSettings({ webClientId, email: '', lastBackup: '', lastError: '' });
+  await updateSettings({ webClientId, email: '', lastBackup: '', lastError: '', workspaceEnabled: false });
   await AsyncStorage.setItem(STORAGE_KEYS.uploadedData, '');
   configuredClientId = '';
 }
@@ -67,8 +68,29 @@ async function driveRequest(url: string, options: RequestInit = {}) {
     accessToken = (await GoogleSignin.getTokens()).accessToken;
     response = await send();
   }
-  if (!response.ok) throw new Error(`Google Drive request failed (${response.status}). Check connection and Drive consent.`);
+    if (!response.ok) throw new Error(`Google request failed (${response.status}). Check API setup, connection and granted permissions.`);
   return response;
+}
+
+export async function connectGoogleWorkspace() {
+  if (!(await getDriveSettings()).enabled && !await connectDrive()) return false;
+  const { GoogleSignin, isSuccessResponse } = await google();
+  const response = await GoogleSignin.addScopes({ scopes: WORKSPACE_SCOPES });
+  if (!response || !isSuccessResponse(response)) return false;
+  if (!WORKSPACE_SCOPES.every(scope => response.data.scopes.includes(scope))) {
+    throw new Error('Gmail and file permissions were not all approved. Try connecting again and approve the requested access.');
+  }
+  await updateSettings({ workspaceEnabled: true });
+  return true;
+}
+
+export async function googleWorkspaceRequest(url: string, options?: RequestInit) {
+  if (!/^https:\/\/(gmail\.googleapis\.com\/gmail\/v1\/|www\.googleapis\.com\/(drive\/v3\/|upload\/drive\/v3\/))/.test(url)) {
+    throw new Error('Unsupported Google API address.');
+  }
+  const settings = await getDriveSettings();
+  if (!settings.enabled || !settings.workspaceEnabled) throw new Error('Connect Gmail and Drive in the Google tab first.');
+  return driveRequest(url, options);
 }
 
 export async function connectDrive(clientId?: string) {
@@ -81,14 +103,14 @@ export async function connectDrive(clientId?: string) {
   if (!isSuccessResponse(response)) return false;
   // Confirm access is available before enabling automatic uploads.
   await GoogleSignin.getTokens();
-  await updateSettings({ enabled: true, email: response.data.user.email, lastBackup: '', lastError: '' });
+  await updateSettings({ enabled: true, email: response.data.user.email, lastBackup: '', lastError: '', workspaceEnabled: false });
   await AsyncStorage.setItem(STORAGE_KEYS.uploadedData, '');
   return true;
 }
 
 export async function disconnectDrive() {
   // Disable scheduled uploads first, then finish any upload already in progress.
-  await updateSettings({ enabled: false });
+  await updateSettings({ enabled: false, workspaceEnabled: false });
   if (activeBackup) await activeBackup.catch(() => {});
   const { GoogleSignin } = await google();
   await GoogleSignin.signOut();

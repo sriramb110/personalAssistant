@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
-import { connectDrive, disconnectDrive, getDriveSettings, runDailyBackup, saveDriveClientId, type DriveSettings } from '../services/driveBackup';
+import { connectDrive, connectGoogleWorkspace, disconnectDrive, getDriveSettings, runDailyBackup, saveDriveClientId, type DriveSettings } from '../services/driveBackup';
 import { updateBackupSchedule } from '../services/backupTask';
 
 export function useDriveBackup(ready: boolean) {
@@ -40,10 +40,18 @@ export function useDriveBackup(ready: boolean) {
   const disconnect = () => act(async () => {
     await disconnectDrive(); await updateBackupSchedule(); setNotice('Drive disconnected. Local data is preserved.');
   });
+  const connectWorkspace = () => act(async () => {
+    const connected = await connectGoogleWorkspace();
+    if ((await getDriveSettings()).enabled) {
+      await updateBackupSchedule().catch(() => false);
+      await runDailyBackup(true);
+    }
+    setNotice(connected ? 'Gmail and Drive connected. Daily backup is enabled.' : 'Gmail permission request cancelled. Previously approved Drive backup remains available.');
+  });
   const backupNow = () => act(async () => { await runDailyBackup(true); setNotice('Backup uploaded successfully.'); });
   const saveClientId = (value: string) => act(async () => {
     await saveDriveClientId(value);
     setNotice('Client ID saved on this phone. Connect Google Drive to enable backups.');
   });
-  return { settings, working, notice, connect, disconnect, backupNow, saveClientId, act };
+  return { settings, working, notice, connect, connectWorkspace, disconnect, backupNow, saveClientId, act };
 }

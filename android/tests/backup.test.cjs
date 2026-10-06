@@ -16,11 +16,14 @@ function setup(options = {}) {
   let fileExists = false;
   let notificationQueue = '[]';
   let acknowledgements = 0;
+  let serverSnapshot = null;
+  const secrets = new Map();
   const notificationModule = {
     peek: async () => notificationQueue,
     acknowledge: async () => { acknowledgements++; notificationQueue = '[]'; },
   };
   const signin = {
+    addScopes: async ({ scopes }) => options.cancelWorkspace ? { type: 'cancelled' } : { type: 'success', data: { scopes: options.partialWorkspace ? scopes.slice(0, 1) : scopes } },
     configure(config) { configurations.push(config); }, getCurrentUser: () => ({ email: 'test@example.com' }),
     hasPlayServices: async () => true,
     signIn: async () => options.cancelSignIn ? { type: 'cancelled' } : { type: 'success', data: { user: { email: 'test@example.com' } } },
@@ -30,11 +33,22 @@ function setup(options = {}) {
     signOut: async () => {},
   };
   const storage = { getItem: async key => values.get(key) ?? null, setItem: async (key, value) => { values.set(key, value); } };
-  const fetch = async (url, options) => {
-    requests.push({ url, options });
+  const fetch = async (url, requestOptions) => {
+    requests.push({ url, options: requestOptions });
     if (offline) throw new Error('Offline');
     if (unauthorized) { unauthorized = false; return new Response('', { status: 401 }); }
-    if (options.method === 'POST' || options.method === 'PATCH') { fileExists = true; return new Response('{}'); }
+    if (url.includes('/api/v1/assistant/')) {
+      if (options.backendUnauthorized) return new Response('{}', { status: 401 });
+      if (url.endsWith('/status')) return new Response('{"status":"ok","version":1}');
+      if (requestOptions.method === 'PUT') { serverSnapshot = requestOptions.body; return new Response(serverSnapshot); }
+      return new Response(serverSnapshot || '{}', { status: serverSnapshot ? 200 : 404 });
+    }
+    if (url.includes('gmail.googleapis.com')) {
+      if (url.endsWith('/send')) return new Response('{"id":"sent-test"}');
+      if (url.includes('maxResults=')) return new Response('{"messages":[{"id":"mail-1"}]}');
+      return new Response(JSON.stringify({ id: 'mail-1', snippet: 'Preview', payload: { mimeType: 'text/plain', headers: [{ name: 'Subject', value: 'Tamil note' }, { name: 'From', value: 'amma@example.com' }], body: { data: Buffer.from('வணக்கம்').toString('base64url') } } }));
+    }
+    if (requestOptions.method === 'POST' || requestOptions.method === 'PATCH') { fileExists = true; return new Response('{}'); }
     if (url.includes('alt=media')) return new Response(values.get('anbu.data.v1'));
     return new Response(JSON.stringify({ files: fileExists ? [{ id: 'file-1' }] : [] }));
   };
@@ -47,18 +61,86 @@ function setup(options = {}) {
     const requireMock = name => {
       if (name === '@react-native-async-storage/async-storage') return storage;
       if (name === 'react-native') return { Platform: { OS: 'android' } };
+      if (name === 'expo-secure-store') return { getItemAsync: async key => secrets.get(key) ?? null, setItemAsync: async (key, value) => { secrets.set(key, value); }, deleteItemAsync: async key => { secrets.delete(key); } };
       if (name === 'expo') return { requireOptionalNativeModule: () => notificationModule };
       if (name === '@react-native-google-signin/google-signin') return { GoogleSignin: signin, isSuccessResponse: result => result.type === 'success' };
       if (name.startsWith('.')) return load(path.resolve(path.dirname(file), name + '.ts'));
       throw new Error(`Unexpected module: ${name}`);
     };
-    vm.runInNewContext(code, { module, exports: module.exports, require: requireMock, process: { env: { EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: options.envClientId ?? 'test.apps.googleusercontent.com' } }, Error, URLSearchParams, AbortController, setTimeout, clearTimeout, fetch }, { filename: file });
+    vm.runInNewContext(code, { module, exports: module.exports, require: requireMock, process: { env: { EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID: options.envClientId ?? 'test.apps.googleusercontent.com' } }, Error, URL, URLSearchParams, AbortController, setTimeout, clearTimeout, fetch }, { filename: file });
     return module.exports;
   }
-  return { storage: load('src/services/storage.ts'), drive: load('src/services/driveBackup.ts'), notifications: load('src/services/notificationAccess.ts'), merge: load('src/utils/notifications.ts').mergeNotificationMessages, values, requests, configurations,
+  return { storage: load('src/services/storage.ts'), backend: load('src/services/backend.ts'), secrets, drive: load('src/services/driveBackup.ts'), workspace: load('src/services/googleWorkspace.ts'), mail: load('src/utils/mailEncoding.ts'), notifications: load('src/services/notificationAccess.ts'), merge: load('src/utils/notifications.ts').mergeNotificationMessages, values, requests, configurations,
     setNotificationQueue: items => { notificationQueue = JSON.stringify(items); }, acknowledgements: () => acknowledgements,
     setOffline: value => { offline = value; }, expireToken: () => { unauthorized = true; }, refreshCount: () => refreshed };
 }
+
+test('HTTPS backend sync saves credentials securely and round-trips local data', async () => {
+  const { backend, storage, secrets, values, requests } = setup();
+  const key = 'test-access-key-with-at-least-32-characters';
+  await assert.rejects(backend.uploadBackendSnapshot(), /No saved data/);
+  await storage.saveData({ ...storage.defaultData, draft: 'இன்று' });
+  await backend.connectBackend(backend.DEFAULT_BACKEND_URL, key);
+  assert.equal(secrets.get('anbu.backend.token.v1'), key);
+  assert.equal(values.get('anbu.backend.v1').includes(key), false);
+  await assert.rejects(backend.downloadBackendSnapshot(), /No server snapshot/);
+  await backend.uploadBackendSnapshot();
+  assert.equal((await backend.downloadBackendSnapshot()).draft, 'இன்று');
+  assert.ok((await backend.getBackendSettings()).lastSync);
+  const upload = requests.find(item => item.options.method === 'PUT');
+  assert.equal(upload.options.headers.Authorization, `Bearer ${key}`);
+  assert.equal(upload.options.redirect, 'error');
+  assert.equal(upload.options.body.includes(key), false);
+  await backend.disconnectBackend();
+  assert.equal(secrets.size, 0);
+  await assert.rejects(backend.uploadBackendSnapshot(), /Connect your backend/);
+});
+
+test('backend rejects unsafe URLs and failed authentication leaves uploads disabled', async () => {
+  const { backend, secrets, requests } = setup({ backendUnauthorized: true });
+  for (const url of ['http://example.com', 'https://user:pass@example.com', 'https://example.com/path', 'https://example.com?token=secret']) {
+    assert.throws(() => backend.normalizeBackendUrl(url), /HTTPS server origin/);
+  }
+  await assert.rejects(backend.connectBackend(backend.DEFAULT_BACKEND_URL, 'short'), /at least 32/);
+  assert.equal(requests.length, 0);
+  await assert.rejects(backend.connectBackend(backend.DEFAULT_BACKEND_URL, 'test-access-key-with-at-least-32-characters'), /incorrect/);
+  assert.equal((await backend.getBackendSettings()).enabled, false);
+  assert.equal(secrets.size, 0);
+});
+
+test('Gmail requests use explicit extra permissions and preserve Tamil inbox text', async () => {
+  const { drive, workspace, requests } = setup();
+  await assert.rejects(workspace.readGmailInbox(), /Connect Gmail and Drive/);
+  assert.equal(await drive.connectGoogleWorkspace(), true);
+  assert.equal((await drive.getDriveSettings()).workspaceEnabled, true);
+  const inbox = await workspace.readGmailInbox();
+  assert.equal(inbox[0].text, 'வணக்கம்');
+  await workspace.sendGmail('amma@example.com', 'இன்று', 'வணக்கம்');
+  const sent = requests.find(item => item.url.endsWith('/send'));
+  const mime = Buffer.from(JSON.parse(sent.options.body).raw, 'base64url').toString('utf8');
+  assert.ok(mime.startsWith('To: amma@example.com\r\n'));
+  assert.equal(Buffer.from(mime.split('\r\n\r\n')[1], 'base64').toString('utf8'), 'வணக்கம்');
+  await drive.disconnectDrive();
+  await assert.rejects(workspace.readGmailInbox(), /Connect Gmail and Drive/);
+});
+
+test('cancelled or partial Workspace consent does not enable Gmail access', async () => {
+  const cancelled = setup({ cancelWorkspace: true });
+  assert.equal(await cancelled.drive.connectGoogleWorkspace(), false);
+  assert.equal(!!(await cancelled.drive.getDriveSettings()).workspaceEnabled, false);
+  const partial = setup({ partialWorkspace: true });
+  await assert.rejects(partial.drive.connectGoogleWorkspace(), /not all approved/);
+  await assert.rejects(partial.drive.googleWorkspaceRequest('https://example.com'), /Unsupported/);
+});
+
+test('email encoding handles Unicode and rejects header injection', () => {
+  const { mail } = setup();
+  const value = 'தமிழ் English 🙂\nNext line';
+  assert.equal(mail.decodeBase64(mail.encodeBase64(value)), value);
+  assert.equal(Buffer.from(mail.encodeBase64(value), 'base64').toString('utf8'), value);
+  assert.throws(() => mail.emailRaw('a@example.com\r\nBcc: b@example.com', 'Subject', 'Text'), /valid recipient/);
+  assert.throws(() => mail.emailRaw('a@example.com', 'Subject\r\nBcc: b@example.com', 'Text'), /line breaks/);
+});
 
 test('customer client IDs work without build environment configuration and stay out of backups', async () => {
   const { storage, drive, values, configurations } = setup({ envClientId: '' });
